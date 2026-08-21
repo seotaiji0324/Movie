@@ -225,18 +225,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   cursor: pointer;
 }
 .library-group header button:hover { color: var(--purple); }
-.library-group header button:disabled { color: #c4c6cc; cursor: default; }
 .library-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
-.library-group-empty {
-  grid-column: 1 / -1;
-  padding: 12px 10px;
-  border: 1px dashed #e0e1e6;
-  border-radius: 9px;
-  background: #fafafd;
-  color: #a0a3aa;
-  font-size: 8px;
-  text-align: center;
-}
 .library-grid > button {
   position: relative;
   min-width: 0;
