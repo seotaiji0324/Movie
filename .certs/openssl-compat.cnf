@@ -1,0 +1,10 @@
+openssl_conf = openssl_init
+
+[openssl_init]
+ssl_conf = ssl_configuration
+
+[ssl_configuration]
+system_default = tls_defaults
+
+[tls_defaults]
+CipherString = DEFAULT@SECLEVEL=1
