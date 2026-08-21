@@ -118,6 +118,34 @@ try {
       canUseAccountAdmin = false;
     }
     process.stdout.write(`RESULT=${JSON.stringify({ ...initialContext, warehouse, canUseAccountAdmin })}\n`);
+  } else if (process.argv.includes("--normalize-categories")) {
+    await execute(adminConnection, "USE ROLE ACCOUNTADMIN");
+    await execute(
+      adminConnection,
+      `
+        MERGE INTO ${DATABASE}.${SCHEMA}.CATEGORY AS target
+        USING (
+          SELECT column1 AS NAME, column2 AS DISPLAY_ORDER
+          FROM VALUES ('모델', 1), ('음식', 2), ('재미', 3), ('작업', 4), ('기타', 5)
+        ) AS source
+        ON target.NAME = source.NAME
+        WHEN MATCHED THEN UPDATE SET target.DISPLAY_ORDER = source.DISPLAY_ORDER, target.IS_ACTIVE = TRUE, target.UPDATED_AT = CURRENT_TIMESTAMP()
+        WHEN NOT MATCHED THEN INSERT (NAME, DISPLAY_ORDER, IS_ACTIVE) VALUES (source.NAME, source.DISPLAY_ORDER, TRUE)
+      `,
+    );
+    await execute(
+      adminConnection,
+      `UPDATE ${DATABASE}.${SCHEMA}.CATEGORY SET IS_ACTIVE = FALSE, UPDATED_AT = CURRENT_TIMESTAMP() WHERE NAME NOT IN ('모델', '음식', '재미', '작업', '기타')`,
+    );
+    await execute(
+      adminConnection,
+      `UPDATE ${DATABASE}.${SCHEMA}.VIDEO_POSTS SET CATEGORY = '기타' WHERE CATEGORY NOT IN (SELECT NAME FROM ${DATABASE}.${SCHEMA}.CATEGORY WHERE IS_ACTIVE = TRUE)`,
+    );
+    const rows = await execute(
+      adminConnection,
+      `SELECT CATEGORY AS "category", COUNT(*) AS "count" FROM ${DATABASE}.${SCHEMA}.VIDEO_POSTS GROUP BY CATEGORY ORDER BY CATEGORY`,
+    );
+    process.stdout.write(`RESULT=${JSON.stringify({ normalized: true, categories: rows.map((row) => ({ category: row.category, count: Number(row.count) })) })}\n`);
   } else {
     const rsaPublicKey = publicKey();
     await execute(adminConnection, "USE ROLE ACCOUNTADMIN");
