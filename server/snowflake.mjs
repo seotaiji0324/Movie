@@ -16,7 +16,7 @@ snowflake.configure({ logLevel: "OFF" });
 function json(res, status, payload) {
   res.statusCode = status;
   res.setHeader("content-type", "application/json; charset=utf-8");
-  if (status >= 400 || payload?.authenticated !== undefined) res.setHeader("cache-control", "no-store");
+  res.setHeader("cache-control", "no-store");
   res.end(JSON.stringify(payload));
 }
 
@@ -183,7 +183,11 @@ async function ensureSchema(connection) {
           ('음식', 2),
           ('재미', 3),
           ('작업', 4),
-          ('기타', 5)
+          ('기타', 5),
+          ('댄스', 6),
+          ('미술', 7),
+          ('음악', 8),
+          ('뉴스', 9)
       ) AS source
       ON target.NAME = source.NAME
       WHEN MATCHED THEN UPDATE SET
@@ -193,10 +197,6 @@ async function ensureSchema(connection) {
       WHEN NOT MATCHED THEN INSERT (NAME, DISPLAY_ORDER, IS_ACTIVE)
         VALUES (source.NAME, source.DISPLAY_ORDER, TRUE)
     `,
-  );
-  await execute(
-    connection,
-    `UPDATE ${objectName("CATEGORY")} SET IS_ACTIVE = FALSE, UPDATED_AT = CURRENT_TIMESTAMP() WHERE NAME NOT IN ('모델', '음식', '재미', '작업', '기타')`,
   );
   await execute(
     connection,

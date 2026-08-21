@@ -197,6 +197,7 @@ async function jsonRequest(url, options = {}) {
   const token = storedAdminToken();
   const response = await fetch(apiUrl(url), {
     credentials: "include",
+    cache: "no-store",
     ...options,
     headers: {
       ...(options.body ? { "content-type": "application/json" } : {}),
@@ -638,8 +639,7 @@ export function App() {
           !query || [post.title, post.caption, post.location, post.category]
             .some((value) => String(value || "").toLocaleLowerCase("ko").includes(query))
         )),
-      }))
-      .filter((group) => group.items.length);
+      }));
   }, [categoryOptions, posts, searchTerm]);
 
   function openPlayer(post) {
@@ -814,7 +814,7 @@ export function App() {
                 {dbChecked && dbConnected && !libraryGroups.length && <div className="library-empty">등록된 뮤직비디오 클립이 없습니다.</div>}
                 {libraryGroups.map((group) => (
                   <section className="library-group" key={group.category}>
-                    <header><h3>{group.category}</h3><button type="button" onClick={() => { setFilter(group.category); setActivePost(group.items[0]); }}>모두 보기</button></header>
+                    <header><h3>{group.category}</h3><button type="button" disabled={!group.items.length} onClick={() => { setFilter(group.category); setActivePost(group.items[0]); }}>모두 보기</button></header>
                     <div className="library-grid">
                       {group.items.map((post) => (
                         <button key={post.id} className={featuredPost?.id === post.id ? "selected" : ""} type="button" onClick={() => openPlayer(post)}>
@@ -823,6 +823,7 @@ export function App() {
                           <strong>{post.title}</strong>
                         </button>
                       ))}
+                      {!group.items.length && <div className="library-group-empty">등록된 클립 없음</div>}
                     </div>
                   </section>
                 ))}

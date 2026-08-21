@@ -118,7 +118,7 @@ try {
       canUseAccountAdmin = false;
     }
     process.stdout.write(`RESULT=${JSON.stringify({ ...initialContext, warehouse, canUseAccountAdmin })}\n`);
-  } else if (process.argv.includes("--normalize-categories")) {
+  } else if (process.argv.includes("--normalize-categories") || process.argv.includes("--sync-base-categories")) {
     await execute(adminConnection, "USE ROLE ACCOUNTADMIN");
     await execute(
       adminConnection,
@@ -133,19 +133,11 @@ try {
         WHEN NOT MATCHED THEN INSERT (NAME, DISPLAY_ORDER, IS_ACTIVE) VALUES (source.NAME, source.DISPLAY_ORDER, TRUE)
       `,
     );
-    await execute(
-      adminConnection,
-      `UPDATE ${DATABASE}.${SCHEMA}.CATEGORY SET IS_ACTIVE = FALSE, UPDATED_AT = CURRENT_TIMESTAMP() WHERE NAME NOT IN ('모델', '음식', '재미', '작업', '기타')`,
-    );
-    await execute(
-      adminConnection,
-      `UPDATE ${DATABASE}.${SCHEMA}.VIDEO_POSTS SET CATEGORY = '기타' WHERE CATEGORY NOT IN (SELECT NAME FROM ${DATABASE}.${SCHEMA}.CATEGORY WHERE IS_ACTIVE = TRUE)`,
-    );
     const rows = await execute(
       adminConnection,
-      `SELECT CATEGORY AS "category", COUNT(*) AS "count" FROM ${DATABASE}.${SCHEMA}.VIDEO_POSTS GROUP BY CATEGORY ORDER BY CATEGORY`,
+      `SELECT NAME AS "name", DISPLAY_ORDER AS "displayOrder" FROM ${DATABASE}.${SCHEMA}.CATEGORY WHERE IS_ACTIVE = TRUE ORDER BY DISPLAY_ORDER, NAME`,
     );
-    process.stdout.write(`RESULT=${JSON.stringify({ normalized: true, categories: rows.map((row) => ({ category: row.category, count: Number(row.count) })) })}\n`);
+    process.stdout.write(`RESULT=${JSON.stringify({ synced: true, categories: rows.map((row) => ({ name: row.name, displayOrder: Number(row.displayOrder) })) })}\n`);
   } else {
     const rsaPublicKey = publicKey();
     await execute(adminConnection, "USE ROLE ACCOUNTADMIN");
