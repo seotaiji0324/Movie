@@ -1,4 +1,4 @@
-import { createHash, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, pbkdf2Sync, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import snowflake from "snowflake-sdk/dist/index.js";
 
 const MAX_VIDEO_BYTES = Number(process.env.MAX_VIDEO_BYTES || 50 * 1024 * 1024);
@@ -8,7 +8,7 @@ const ADMIN_USERNAME = "SEOHYUNHO";
 const ADMIN_SESSION_COOKIE = "daytrip_admin_session";
 const ADMIN_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const PASSWORD_ITERATIONS = 210_000;
-const adminSessions = new Map();
+const localAdminSessionSecret = randomBytes(32).toString("base64url");
 let connectionPromise;
 
 snowflake.configure({ logLevel: "OFF" });
@@ -49,9 +49,11 @@ function objectName(name) {
 function isConfigured() {
   if (process.env.SNOWFLAKE_CONNECTION_NAME) return true;
   return Boolean(
-    process.env.SNOWFLAKE_ACCOUNT &&
+      process.env.SNOWFLAKE_ACCOUNT &&
       process.env.SNOWFLAKE_USERNAME &&
-      (process.env.SNOWFLAKE_PASSWORD || process.env.SNOWFLAKE_AUTHENTICATOR),
+      (process.env.SNOWFLAKE_PASSWORD ||
+        process.env.SNOWFLAKE_AUTHENTICATOR ||
+        process.env.SNOWFLAKE_PRIVATE_KEY_BASE64),
   );
 }
 
@@ -61,7 +63,9 @@ function connect(connection) {
       if (error) reject(error);
       else resolve(activeConnection);
     };
-    if (process.env.SNOWFLAKE_AUTHENTICATOR) connection.connectAsync(complete);
+    if (/^(OAUTH_AUTHORIZATION_CODE|EXTERNALBROWSER)$/i.test(process.env.SNOWFLAKE_AUTHENTICATOR || "")) {
+      connection.connectAsync(complete);
+    }
     else connection.connect(complete);
   });
 }
@@ -234,10 +238,16 @@ async function getConnection() {
           retryTimeout: 0,
         };
         if (process.env.SNOWFLAKE_PASSWORD) options.password = process.env.SNOWFLAKE_PASSWORD;
+        if (process.env.SNOWFLAKE_PRIVATE_KEY_BASE64) {
+          options.privateKey = Buffer.from(process.env.SNOWFLAKE_PRIVATE_KEY_BASE64, "base64").toString("utf8");
+          options.authenticator = process.env.SNOWFLAKE_AUTHENTICATOR || "SNOWFLAKE_JWT";
+        }
         if (process.env.SNOWFLAKE_AUTHENTICATOR) {
           options.authenticator = process.env.SNOWFLAKE_AUTHENTICATOR;
-          options.clientStoreTemporaryCredential = process.env.SNOWFLAKE_CLIENT_STORE_TEMPORARY_CREDENTIAL !== "false";
-          options.browserActionTimeout = Number(process.env.SNOWFLAKE_BROWSER_ACTION_TIMEOUT || 600_000);
+          if (/^(OAUTH_AUTHORIZATION_CODE|EXTERNALBROWSER)$/i.test(process.env.SNOWFLAKE_AUTHENTICATOR)) {
+            options.clientStoreTemporaryCredential = process.env.SNOWFLAKE_CLIENT_STORE_TEMPORARY_CREDENTIAL !== "false";
+            options.browserActionTimeout = Number(process.env.SNOWFLAKE_BROWSER_ACTION_TIMEOUT || 600_000);
+          }
         }
         const proxyValue = process.env.HTTPS_PROXY || process.env.https_proxy;
         if (proxyValue) {
@@ -253,7 +263,7 @@ async function getConnection() {
       }
       await connect(connection);
       await ensureWarehouse(connection);
-      await ensureSchema(connection);
+      if (process.env.SNOWFLAKE_SKIP_SCHEMA_SETUP !== "true") await ensureSchema(connection);
       return connection;
     })().catch((error) => {
       connectionPromise = undefined;
@@ -329,42 +339,64 @@ function parseCookies(req) {
     }, {});
 }
 
-function tokenKey(token) {
-  return createHash("sha256").update(token).digest("hex");
+function sessionSecret() {
+  return process.env.ADMIN_SESSION_SECRET || localAdminSessionSecret;
+}
+
+function signedSessionToken(payload) {
+  const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const signature = createHmac("sha256", sessionSecret()).update(encoded).digest("base64url");
+  return `${encoded}.${signature}`;
+}
+
+function verifySessionToken(token) {
+  const [encoded, suppliedSignature] = String(token || "").split(".");
+  if (!encoded || !suppliedSignature) return null;
+  const expectedSignature = createHmac("sha256", sessionSecret()).update(encoded).digest();
+  let supplied;
+  try {
+    supplied = Buffer.from(suppliedSignature, "base64url");
+  } catch {
+    return null;
+  }
+  if (supplied.length !== expectedSignature.length || !timingSafeEqual(supplied, expectedSignature)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8"));
+    return payload?.expiresAt > Date.now() ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+function sessionCookieAttributes(maxAge) {
+  const crossSite = process.env.ADMIN_COOKIE_CROSS_SITE === "true";
+  return `HttpOnly; ${crossSite ? "SameSite=None; Secure" : "SameSite=Strict"}; Path=/; Max-Age=${maxAge}`;
 }
 
 function issueAdminSession(res) {
-  const token = randomBytes(32).toString("base64url");
-  adminSessions.set(tokenKey(token), {
+  const token = signedSessionToken({
     username: ADMIN_USERNAME,
     expiresAt: Date.now() + ADMIN_SESSION_TTL_MS,
   });
   res.setHeader(
     "set-cookie",
-    `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(ADMIN_SESSION_TTL_MS / 1000)}`,
+    `${ADMIN_SESSION_COOKIE}=${encodeURIComponent(token)}; ${sessionCookieAttributes(Math.floor(ADMIN_SESSION_TTL_MS / 1000))}`,
   );
+  return token;
 }
 
-function clearAdminSession(req, res) {
-  const token = parseCookies(req)[ADMIN_SESSION_COOKIE];
-  if (token) adminSessions.delete(tokenKey(token));
+function clearAdminSession(_req, res) {
   res.setHeader(
     "set-cookie",
-    `${ADMIN_SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`,
+    `${ADMIN_SESSION_COOKIE}=; ${sessionCookieAttributes(0)}`,
   );
 }
 
 function currentAdminSession(req) {
-  const token = parseCookies(req)[ADMIN_SESSION_COOKIE];
-  if (!token) return null;
-  const key = tokenKey(token);
-  const session = adminSessions.get(key);
-  if (!session) return null;
-  if (session.expiresAt <= Date.now()) {
-    adminSessions.delete(key);
-    return null;
-  }
-  return session;
+  const authorization = String(req.headers.authorization || "");
+  const bearerToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+  const token = bearerToken || parseCookies(req)[ADMIN_SESSION_COOKIE];
+  return verifySessionToken(token);
 }
 
 function isLoopbackRequest(req) {
@@ -434,12 +466,13 @@ async function setupAdmin(connection, req, res) {
     `,
     [randomUUID(), ADMIN_USERNAME, ADMIN_USERNAME, passwordHash, salt],
   );
-  issueAdminSession(res);
+  const sessionToken = issueAdminSession(res);
   json(res, 201, {
     authenticated: true,
     setupRequired: false,
     username: ADMIN_USERNAME,
     displayName: ADMIN_USERNAME,
+    sessionToken,
   });
 }
 
@@ -460,12 +493,13 @@ async function loginAdmin(connection, req, res) {
     `UPDATE ${objectName("MEMBER")} SET LAST_LOGIN_AT = CURRENT_TIMESTAMP(), UPDATED_AT = CURRENT_TIMESTAMP() WHERE ID = ?`,
     [member.id],
   );
-  issueAdminSession(res);
+  const sessionToken = issueAdminSession(res);
   json(res, 200, {
     authenticated: true,
     setupRequired: false,
     username: ADMIN_USERNAME,
     displayName: member.displayName,
+    sessionToken,
   });
 }
 
@@ -885,75 +919,77 @@ function publicMessage(error) {
   return "Snowflake 연결 또는 요청 처리에 실패했습니다.";
 }
 
+export async function snowflakeApiMiddleware(req, res, next = () => {}, logger = console) {
+  const url = new URL(req.url || "/", "http://local.test");
+  const isVideoApi = url.pathname.startsWith("/api/videos");
+  const isAdminApi = url.pathname.startsWith("/api/admin");
+  const isCategoryApi = url.pathname.startsWith("/api/categories");
+  if (!isVideoApi && !isAdminApi && !isCategoryApi) return next();
+
+  if (!isConfigured()) {
+    if (req.method === "GET" && url.pathname === "/api/videos") {
+      return json(res, 200, {
+        configured: false,
+        connected: false,
+        database: databaseName(),
+        videos: [],
+      });
+    }
+    return json(res, 503, { message: "Snowflake 환경변수 설정이 필요합니다." });
+  }
+
+  try {
+    const connection = await getConnection();
+    if (req.method === "GET" && url.pathname === "/api/categories") {
+      return await listCategories(connection, res);
+    }
+    if (req.method === "GET" && url.pathname === "/api/admin/session") {
+      return await adminSessionStatus(connection, req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/setup") {
+      return await setupAdmin(connection, req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/login") {
+      return await loginAdmin(connection, req, res);
+    }
+    if (req.method === "POST" && url.pathname === "/api/admin/logout") {
+      return await logoutAdmin(req, res);
+    }
+    if (req.method === "GET" && url.pathname === "/api/admin/videos") {
+      return await listAdminVideos(connection, req, res);
+    }
+    const adminVideoMatch = url.pathname.match(/^\/api\/admin\/videos\/([0-9a-f-]+)$/i);
+    if (req.method === "PATCH" && adminVideoMatch) {
+      return await updateAdminVideo(connection, req, adminVideoMatch[1], res);
+    }
+    if (req.method === "DELETE" && adminVideoMatch) {
+      return await deleteAdminVideo(connection, req, adminVideoMatch[1], res);
+    }
+    if (req.method === "GET" && url.pathname === "/api/videos") return await listVideos(connection, res);
+    if (req.method === "POST" && url.pathname === "/api/videos") return await createVideo(connection, req, res);
+
+    const posterMatch = url.pathname.match(/^\/api\/videos\/([0-9a-f-]+)\/poster$/i);
+    if (req.method === "GET" && posterMatch) return await servePoster(connection, posterMatch[1], res);
+    const videoMatch = url.pathname.match(/^\/api\/videos\/([0-9a-f-]+)\/content$/i);
+    if (req.method === "GET" && videoMatch) return await serveVideo(connection, req, videoMatch[1], res);
+
+    return json(res, 404, { message: "요청한 API를 찾을 수 없습니다." });
+  } catch (error) {
+    const statusCode = Number(error.statusCode) || 500;
+    if (statusCode >= 500) logger.error(error);
+    return json(res, statusCode, {
+      configured: true,
+      connected: statusCode < 500,
+      message: statusCode < 500 ? error.message : publicMessage(error),
+    });
+  }
+}
+
 export function snowflakeApiPlugin() {
   return {
     name: "snowflake-video-api",
     configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = new URL(req.url || "/", "http://local.test");
-        const isVideoApi = url.pathname.startsWith("/api/videos");
-        const isAdminApi = url.pathname.startsWith("/api/admin");
-        const isCategoryApi = url.pathname.startsWith("/api/categories");
-        if (!isVideoApi && !isAdminApi && !isCategoryApi) return next();
-
-        if (!isConfigured()) {
-          if (req.method === "GET" && url.pathname === "/api/videos") {
-            return json(res, 200, {
-              configured: false,
-              connected: false,
-              database: databaseName(),
-              videos: [],
-            });
-          }
-          return json(res, 503, { message: "Snowflake 환경변수 설정이 필요합니다." });
-        }
-
-        try {
-          const connection = await getConnection();
-          if (req.method === "GET" && url.pathname === "/api/categories") {
-            return await listCategories(connection, res);
-          }
-          if (req.method === "GET" && url.pathname === "/api/admin/session") {
-            return await adminSessionStatus(connection, req, res);
-          }
-          if (req.method === "POST" && url.pathname === "/api/admin/setup") {
-            return await setupAdmin(connection, req, res);
-          }
-          if (req.method === "POST" && url.pathname === "/api/admin/login") {
-            return await loginAdmin(connection, req, res);
-          }
-          if (req.method === "POST" && url.pathname === "/api/admin/logout") {
-            return await logoutAdmin(req, res);
-          }
-          if (req.method === "GET" && url.pathname === "/api/admin/videos") {
-            return await listAdminVideos(connection, req, res);
-          }
-          const adminVideoMatch = url.pathname.match(/^\/api\/admin\/videos\/([0-9a-f-]+)$/i);
-          if (req.method === "PATCH" && adminVideoMatch) {
-            return await updateAdminVideo(connection, req, adminVideoMatch[1], res);
-          }
-          if (req.method === "DELETE" && adminVideoMatch) {
-            return await deleteAdminVideo(connection, req, adminVideoMatch[1], res);
-          }
-          if (req.method === "GET" && url.pathname === "/api/videos") return await listVideos(connection, res);
-          if (req.method === "POST" && url.pathname === "/api/videos") return await createVideo(connection, req, res);
-
-          const posterMatch = url.pathname.match(/^\/api\/videos\/([0-9a-f-]+)\/poster$/i);
-          if (req.method === "GET" && posterMatch) return await servePoster(connection, posterMatch[1], res);
-          const videoMatch = url.pathname.match(/^\/api\/videos\/([0-9a-f-]+)\/content$/i);
-          if (req.method === "GET" && videoMatch) return await serveVideo(connection, req, videoMatch[1], res);
-
-          return json(res, 404, { message: "요청한 API를 찾을 수 없습니다." });
-        } catch (error) {
-          const statusCode = Number(error.statusCode) || 500;
-          if (statusCode >= 500) server.config.logger.error(error);
-          return json(res, statusCode, {
-            configured: true,
-            connected: statusCode < 500,
-            message: statusCode < 500 ? error.message : publicMessage(error),
-          });
-        }
-      });
+      server.middlewares.use((req, res, next) => snowflakeApiMiddleware(req, res, next, server.config.logger));
     },
   };
 }

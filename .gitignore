@@ -4,3 +4,6 @@ dist/
 .env.local
 .env.*.local
 work/
+
+# Local Netlify folder
+.netlify
