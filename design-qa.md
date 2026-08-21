@@ -1,61 +1,68 @@
-# Design QA — 하루여행 Video Travel Log
+# Musecut Music Video Studio — Design QA
 
 ## Evidence
 
-- Source visual truth: `C:\Users\SDS\AppData\Local\Temp\codex-clipboard-e0ff31a8-87d3-47d9-ab71-fc4d4e45f0e0.png`
-- Source pixels: 518 × 300
-- Implementation URL: `http://127.0.0.1:4180/`
-- Implementation screenshot: not captured
-- Intended desktop viewport: default Codex Desktop browser viewport
-- CSS size / density normalization: unavailable because the implementation screenshot could not be captured
-- State: initial gallery with all five cards and no modal open
-
-## Full-view comparison evidence
-
-The reference image was opened and inspected. The implementation could not be captured in the configured in-app browser: port 4173 is already occupied by a long-running, unrelated local project, while navigation to the current prototype on alternate local ports timed out. The unrelated process was deliberately left untouched.
-
-Code and asset inspection confirm that the implementation deliberately carries over the reference's thin coral top rule, centered camper-bus mark, coral Korean display headline, generous off-white whitespace, five rounded portrait travel cards, soft shadows, and pastel category labels. This is not a substitute for browser-rendered visual evidence.
-
-## Focused region comparison evidence
-
-Blocked. The generated camper-bus asset and all five individual travel posters were opened and inspected at source resolution, but typography, crop behavior, live spacing, and modal states could not be compared against a browser-rendered screenshot.
+- Source visual truth: `C:\Users\MIRACOM\AppData\Local\Temp\codex-clipboard-76c6a27d-d29b-4a70-8489-a59e59d9f898.png`
+- Final implementation: `C:\Users\MIRACOM\Documents\ChatGPT\MovieProject\.codex\music-studio-final-944x646.png`
+- Full-view comparison: `C:\Users\MIRACOM\Documents\ChatGPT\MovieProject\.codex\design-qa-comparison-final.png`
+- Focused editor comparison: `C:\Users\MIRACOM\Documents\ChatGPT\MovieProject\.codex\design-qa-focused-editor-final.png`
+- Mobile evidence: `C:\Users\MIRACOM\Documents\ChatGPT\MovieProject\.codex\music-studio-mobile-390x844.png`
+- Viewport: 944 × 646 CSS px for the source-aligned desktop comparison.
+- Pixel dimensions: source 944 × 646 px; implementation 944 × 646 px.
+- Density normalization: equal pixel and CSS dimensions, compared at 1:1.
+- State: MOVIEDB connected, one published clip selected, media tool open, video paused, no modal open.
 
 ## Findings
 
-- [P1] Browser-rendered comparison is unavailable
-  - Location: full initial page and modal states.
-  - Evidence: the local implementation responds and production build passes, but the in-app browser could not navigate to the alternate preview port.
-  - Impact: final visual fidelity, responsive layout, and interaction appearance remain unverified.
-  - Fix: free the designated preview port or use an available browser connection, then capture the initial gallery, player modal, and upload modal.
+- No actionable P0, P1, or P2 differences remain.
+- Fonts and typography: the italic serif Musecut wordmark and compact sans-serif editor labels preserve the source hierarchy. Korean title scale, small metadata, truncation, and contrast remain readable at the reference viewport.
+- Spacing and layout rhythm: the 50 px top bar, 62 px tool rail, 318 px media library, centered 16:9 stage, and bottom sequence panel match the source's main regions and density. No desktop overflow was observed.
+- Colors and visual tokens: Musecut uses a solid purple brand bar instead of copying Canva's blue-purple branded header. Active selections, database status, neutral workspace surfaces, borders, and shadows remain faithful to the reference interaction language.
+- Image quality and asset fidelity: all visible thumbnails and stage imagery come from the registered MOVIEDB video/poster path. No placeholder or CSS-generated product imagery is used. The crop remains sharp and proportional.
+- Copy and content: all app-specific language is consistently rewritten around music-video projects, clips, sequences, concepts, shooting dates, and studio administration.
+- Icons: all visible controls use one Phosphor icon family with consistent weight and alignment.
+- Accessibility and responsiveness: semantic buttons and labels, visible focus treatment, alt text, keyboard-reachable controls, and adequate contrast are present. At 390 × 844, horizontal overflow was absent (`scrollWidth` matched `clientWidth`).
 
-## Required fidelity surfaces
+## Interaction Verification
 
-- Fonts and typography: specified with Nanum Myeongjo, Gowun Dodum, and DM Sans; browser rendering not verified.
-- Spacing and layout rhythm: implemented to mirror the airy reference composition; browser rendering not verified.
-- Colors and visual tokens: coral, warm off-white, muted ink, and pastel category tokens are present in source; browser rendering not verified.
-- Image quality and asset fidelity: camper bus plus five distinct portrait assets were opened and inspected successfully; final card crops not verified.
-- Copy and content: Korean travel-blog copy is present and internally consistent; line wrapping not verified.
+- Media → Text tool switch and “미디어로 돌아가기”: passed.
+- Clip search and no-results state: passed.
+- New music-video upload modal open/close and rewritten copy: passed.
+- Stage play/pause control: passed.
+- Snowflake-backed clip count and stage selection: passed.
+- Browser console errors: none.
 
-## Primary interactions
+## Comparison History
 
-- Card opens video player: implemented, browser test blocked.
-- Video play/pause and native controls: implemented, browser test blocked.
-- Category filtering: implemented, browser test blocked.
-- Upload modal and validation: implemented, browser test blocked.
-- CockroachDB persistence: API and schema implemented; live test blocked until `DATABASE_URL` is supplied.
-- Browser console errors: not checked because browser navigation was blocked.
+### Iteration 1
 
-## Comparison history
+- Evidence: `.codex/music-studio-944x646.png`
+- [P2] Timeline clip expanded vertically beyond its track because the flex child had no explicit height.
+- [P2] At 944 px, the media library collapsed to 280 px, shifting the editor boundary away from the source's approximately 376 px split.
+- Fixes: constrained the timeline strip and clips to the track height; moved the compact breakpoint below 840 px; restored the 318 px media library; adjusted the stage and timeline row sizes.
 
-- Pass 1: source visual inspected; implementation capture blocked by local preview port conflict.
-- Fixes made: launched the current app on isolated port 4180 and kept the unrelated port-4173 project running.
-- Post-fix evidence: HTTP response, production build, and Sites tests pass; the in-app browser still cannot reach the alternate port, so visual comparison remains blocked.
+### Iteration 2
 
-## Implementation checklist
+- Evidence: `.codex/music-studio-final-944x646.png`
+- Post-fix result: timeline clips stay within the sequence strip, the editor begins at the source-aligned boundary, the stage is 16:9, and all persistent controls fit without overflow.
+- No remaining P0, P1, or P2 findings.
 
-- Capture the initial gallery at a desktop viewport.
-- Test a card, playback, filters, upload modal, Escape dismissal, and mobile layout.
-- Check console errors and compare the captured gallery against the source image.
-- Complete a second QA pass and update this report.
+## Open Questions
 
-final result: blocked
+- The source shows several stock clips, while MOVIEDB currently contains one published clip. The implementation intentionally shows only registered data and an add button, preserving the product's database-only rule.
+
+## Implementation Checklist
+
+- [x] Reference-aligned editor regions
+- [x] Music-video terminology throughout the public and admin UI
+- [x] MOVIEDB-only media library and sequence
+- [x] Working search, tool states, upload modal, playback, and zoom control
+- [x] Desktop and mobile overflow checks
+- [x] Console error check
+
+## Follow-up Polish
+
+- P3: A future brand asset could add a subtle blue-to-purple raster texture to the header if a closer color match is preferred.
+- P3: Additional registered clips will naturally increase the visual density of the library and sequence to more closely resemble the reference.
+
+final result: passed
