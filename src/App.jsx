@@ -34,8 +34,31 @@ import {
 } from "@phosphor-icons/react";
 
 const assetBase = import.meta.env.BASE_URL || "/";
+const apiBase = String(import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const adminTokenKey = "musecut_admin_session";
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 const MAX_POSTER_BYTES = 1024 * 1024;
+
+function apiUrl(path) {
+  return /^https?:\/\//i.test(path) ? path : `${apiBase}${path}`;
+}
+
+function storedAdminToken() {
+  try {
+    return window.sessionStorage.getItem(adminTokenKey) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeAdminToken(token) {
+  try {
+    if (token) window.sessionStorage.setItem(adminTokenKey, token);
+    else window.sessionStorage.removeItem(adminTokenKey);
+  } catch {
+    // The HttpOnly cookie remains available when session storage is blocked.
+  }
+}
 
 function formatDuration(seconds) {
   if (!seconds) return "00:00";
@@ -149,7 +172,7 @@ async function captureVideoFirstFrame(file) {
 }
 
 function versionedMediaUrl(path, assetVersion) {
-  return `${path}?v=${encodeURIComponent(String(assetVersion))}`;
+  return `${apiUrl(path)}?v=${encodeURIComponent(String(assetVersion))}`;
 }
 
 function mapDatabasePost(post, assetVersion = Date.now()) {
@@ -171,12 +194,16 @@ function mapDatabasePost(post, assetVersion = Date.now()) {
 }
 
 async function jsonRequest(url, options = {}) {
-  const response = await fetch(url, {
-    credentials: "same-origin",
+  const token = storedAdminToken();
+  const response = await fetch(apiUrl(url), {
+    credentials: "include",
+    cache: "no-store",
     ...options,
-    headers: options.body
-      ? { "content-type": "application/json", ...(options.headers || {}) }
-      : options.headers,
+    headers: {
+      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {}),
+    },
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message || "요청을 처리하지 못했습니다.");
@@ -382,6 +409,7 @@ function AdminModal({ session, categories, onSessionChange, onClose, refreshPubl
         method: "POST",
         body: JSON.stringify({ username: "SEOHYUNHO", password }),
       });
+      storeAdminToken(payload.sessionToken);
       onSessionChange({ checked: true, ...payload });
       setToast(session.setupRequired ? "SEOHYUNHO 관리자 설정이 완료되었습니다." : "관리자로 로그인했습니다.");
     } catch (error) {
@@ -395,6 +423,7 @@ function AdminModal({ session, categories, onSessionChange, onClose, refreshPubl
   async function handleLogout() {
     try {
       const payload = await jsonRequest("/api/admin/logout", { method: "POST" });
+      storeAdminToken("");
       onSessionChange({ checked: true, setupRequired: false, ...payload });
       setVideos([]);
       setToast("관리자 로그아웃이 완료되었습니다.");
@@ -515,7 +544,7 @@ export function App() {
 
   const refreshPublicVideos = useCallback(async (signal) => {
     try {
-      const response = await fetch("/api/videos", { signal, cache: "no-store" });
+      const response = await fetch(apiUrl("/api/videos"), { signal, cache: "no-store", credentials: "include" });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.message || "MOVIEDB 영상을 불러오지 못했습니다.");
       const connected = Boolean(payload.connected);
@@ -611,7 +640,7 @@ export function App() {
             .some((value) => String(value || "").toLocaleLowerCase("ko").includes(query))
         )),
       }))
-      .filter((group) => group.items.length);
+      .filter((group) => group.items.length > 0);
   }, [categoryOptions, posts, searchTerm]);
 
   function openPlayer(post) {
@@ -701,8 +730,9 @@ export function App() {
         posterMimeType: generatedPoster.mimeType,
         posterDataUrl: generatedPoster.dataUrl,
       };
-      const response = await fetch("/api/videos", {
+      const response = await fetch(apiUrl("/api/videos"), {
         method: "POST",
+        credentials: "include",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });

@@ -1,0 +1,7 @@
+[build]
+  publish = "netlify-static"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["snowflake-sdk"]
